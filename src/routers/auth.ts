@@ -2,6 +2,7 @@ import { t, publicProcedure, protectedProcedure } from '../trpc';
 import { z } from 'zod';
 import bcrypt from 'bcrypt';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import { sendResetPasswordEmail } from '../utils/mailer';
 import { TRPCError } from '@trpc/server';
 
@@ -42,7 +43,31 @@ export const authRouter = t.router({
       });
       if (!user) throw new TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
 
-      const isValid = await bcrypt.compare(input.password, user.password);
+      let isValid = false;
+
+      // Check if password is mathematically a legacy Django PBKDF2 hash
+      if (user.password.startsWith('pbkdf2_sha256$')) {
+        const parts = user.password.split('$');
+        if (parts.length === 4) {
+          const iterations = parseInt(parts[1], 10);
+          const salt = parts[2];
+          const hash = parts[3];
+          const key = crypto.pbkdf2Sync(input.password, salt, iterations, 32, 'sha256');
+          isValid = key.toString('base64') === hash;
+
+          if (isValid) {
+            // Seamlessly upgrade to bcrypt for future logins
+            const newHashedPassword = await bcrypt.hash(input.password, 10);
+            await ctx.prisma.user.update({
+              where: { id: user.id },
+              data: { password: newHashedPassword }
+            });
+          }
+        }
+      } else {
+        isValid = await bcrypt.compare(input.password, user.password);
+      }
+
       if (!isValid) throw new TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
 
       const token = jwt.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
