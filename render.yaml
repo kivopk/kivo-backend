@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: kivo-backend
+    runtime: node
+    plan: free
+    buildCommand: npm run build
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        value: postgresql://neondb_owner:npg_QXGMIiYZ4U6k@ep-dawn-queen-ambp28p4.c-5.us-east-1.aws.neon.tech/neondb?sslmode=require
+      - key: JWT_SECRET
+        value: supersecret
