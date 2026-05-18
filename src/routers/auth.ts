@@ -49,19 +49,23 @@ export const authRouter = t.router({
       if (user.password.startsWith('pbkdf2_sha256$')) {
         const parts = user.password.split('$');
         if (parts.length === 4) {
-          const iterations = parseInt(parts[1], 10);
+          const iterationsStr = parts[1];
           const salt = parts[2];
           const hash = parts[3];
-          const key = crypto.pbkdf2Sync(input.password, salt, iterations, 32, 'sha256');
-          isValid = key.toString('base64') === hash;
+          
+          if (iterationsStr && salt && hash) {
+            const iterations = parseInt(iterationsStr, 10);
+            const key = crypto.pbkdf2Sync(input.password, salt, iterations, 32, 'sha256');
+            isValid = key.toString('base64') === hash;
 
-          if (isValid) {
-            // Seamlessly upgrade to bcrypt for future logins
-            const newHashedPassword = await bcrypt.hash(input.password, 10);
-            await ctx.prisma.user.update({
-              where: { id: user.id },
-              data: { password: newHashedPassword }
-            });
+            if (isValid) {
+              // Seamlessly upgrade to bcrypt for future logins
+              const newHashedPassword = await bcrypt.hash(input.password, 10);
+              await ctx.prisma.user.update({
+                where: { id: user.id },
+                data: { password: newHashedPassword }
+              });
+            }
           }
         }
       } else {

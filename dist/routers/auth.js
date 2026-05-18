@@ -8,6 +8,7 @@ const trpc_1 = require("../trpc");
 const zod_1 = require("zod");
 const bcrypt_1 = __importDefault(require("bcrypt"));
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
+const crypto_1 = __importDefault(require("crypto"));
 const mailer_1 = require("../utils/mailer");
 const server_1 = require("@trpc/server");
 const JWT_SECRET = process.env.JWT_SECRET || 'supersecret';
@@ -45,7 +46,32 @@ exports.authRouter = trpc_1.t.router({
         });
         if (!user)
             throw new server_1.TRPCError({ code: 'NOT_FOUND', message: 'User not found' });
-        const isValid = await bcrypt_1.default.compare(input.password, user.password);
+        let isValid = false;
+        // Check if password is mathematically a legacy Django PBKDF2 hash
+        if (user.password.startsWith('pbkdf2_sha256$')) {
+            const parts = user.password.split('$');
+            if (parts.length === 4) {
+                const iterationsStr = parts[1];
+                const salt = parts[2];
+                const hash = parts[3];
+                if (iterationsStr && salt && hash) {
+                    const iterations = parseInt(iterationsStr, 10);
+                    const key = crypto_1.default.pbkdf2Sync(input.password, salt, iterations, 32, 'sha256');
+                    isValid = key.toString('base64') === hash;
+                    if (isValid) {
+                        // Seamlessly upgrade to bcrypt for future logins
+                        const newHashedPassword = await bcrypt_1.default.hash(input.password, 10);
+                        await ctx.prisma.user.update({
+                            where: { id: user.id },
+                            data: { password: newHashedPassword }
+                        });
+                    }
+                }
+            }
+        }
+        else {
+            isValid = await bcrypt_1.default.compare(input.password, user.password);
+        }
         if (!isValid)
             throw new server_1.TRPCError({ code: 'UNAUTHORIZED', message: 'Invalid credentials' });
         const token = jsonwebtoken_1.default.sign({ userId: user.id }, JWT_SECRET, { expiresIn: '7d' });
